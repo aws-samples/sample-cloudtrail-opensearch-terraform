@@ -1,4 +1,18 @@
 # -----------------------------------------------------------------------------
+# Locals
+# -----------------------------------------------------------------------------
+
+locals {
+  # CloudTrail tampering events to monitor
+  cloudtrail_tampering_events = [
+    "StopLogging",
+    "DeleteTrail",
+    "UpdateTrail",
+    "PutEventSelectors"
+  ]
+}
+
+# -----------------------------------------------------------------------------
 # SNS Topic for Security Alerts
 # -----------------------------------------------------------------------------
 
@@ -98,8 +112,6 @@ resource "opensearch_monitor" "cloudtrail_tampering" {
       }]
     }]
   })
-
-  depends_on = [aws_opensearch_domain.cloudtrail]
 }
 
 # -----------------------------------------------------------------------------
@@ -120,8 +132,6 @@ resource "opensearch_channel_configuration" "sns_alerts" {
       }
     }
   })
-
-  depends_on = [aws_opensearch_domain.cloudtrail]
 }
 
 # -----------------------------------------------------------------------------

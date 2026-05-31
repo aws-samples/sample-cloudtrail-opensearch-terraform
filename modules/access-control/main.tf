@@ -1,46 +1,8 @@
 # -----------------------------------------------------------------------------
-# Data Sources
-# -----------------------------------------------------------------------------
-
-data "aws_caller_identity" "current" {}
-
-data "aws_region" "current" {}
-
-data "aws_partition" "current" {}
-
-data "aws_vpc" "selected" {
-  id = var.vpc_id
-}
-
-data "aws_subnets" "opensearch" {
-  filter {
-    name   = "subnet-id"
-    values = var.vpc_subnet_ids
-  }
-}
-
-# -----------------------------------------------------------------------------
-# Locals
+# Locals - Team Role Definitions
 # -----------------------------------------------------------------------------
 
 locals {
-  account_id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.name
-  partition  = data.aws_partition.current.partition
-
-  # Derive S3 bucket ARN from bucket name
-  cloudtrail_s3_bucket_arn = "arn:${local.partition}:s3:::${var.cloudtrail_s3_bucket_name}"
-
-  common_tags = merge(
-    {
-      Environment = var.environment
-      Project     = var.project_name
-      ManagedBy   = "terraform"
-    },
-    var.additional_tags
-  )
-
-  # Team role definitions for OpenSearch fine-grained access control
   team_roles = {
     security_ops = {
       description         = "Security Operations - full read, alert management"
@@ -73,12 +35,51 @@ locals {
       ]
     }
   }
+}
 
-  # CloudTrail tampering events to monitor
-  cloudtrail_tampering_events = [
-    "StopLogging",
-    "DeleteTrail",
-    "UpdateTrail",
-    "PutEventSelectors"
-  ]
+# -----------------------------------------------------------------------------
+# OpenSearch Roles (fine-grained access control)
+# -----------------------------------------------------------------------------
+
+resource "opensearch_role" "teams" {
+  for_each = local.team_roles
+
+  role_name   = each.key
+  description = each.value.description
+
+  cluster_permissions = each.value.cluster_permissions
+
+  dynamic "index_permissions" {
+    for_each = each.value.index_permissions
+    content {
+      index_patterns  = index_permissions.value.index_patterns
+      allowed_actions = index_permissions.value.allowed_actions
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
+# OpenSearch Role Mappings (IAM role to OpenSearch role)
+# -----------------------------------------------------------------------------
+
+resource "opensearch_roles_mapping" "teams" {
+  for_each = var.team_role_arns
+
+  role_name   = each.key
+  description = "IAM role mapping for ${each.key}"
+
+  backend_roles = [each.value]
+
+  depends_on = [opensearch_role.teams]
+}
+
+# -----------------------------------------------------------------------------
+# OpenSearch Tenants (per-team dashboard isolation)
+# -----------------------------------------------------------------------------
+
+resource "opensearch_tenant" "teams" {
+  for_each = local.team_roles
+
+  tenant_name = each.key
+  description = "Isolated tenant for ${replace(each.key, "_", " ")} team dashboards"
 }

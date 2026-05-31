@@ -1,21 +1,108 @@
-# AWS CloudTrail Monitoring with Amazon OpenSearch Service and Terraform
+# Centralized CloudTrail Monitoring with Amazon OpenSearch Service and Terraform
 
-This Terraform configuration deploys a centralized AWS CloudTrail monitoring solution using Amazon OpenSearch Service. It provisions the complete stack including the OpenSearch domain, ingestion pipeline, index lifecycle management, multi-team access control, and automated alerting.
+This repository contains the companion code for the AWS Big Data Blog post: [How a Financial Services Company Centralized Security Monitoring Across 100+ AWS Accounts](https://aws.amazon.com/blogs/big-data/).
+
+It deploys a centralized AWS CloudTrail monitoring solution using Amazon OpenSearch Service and demonstrates **reusable, modular Terraform** - each module is independently sourceable, composable, and saves significant lines of code when adopted across multiple environments or use cases.
 
 ## Architecture
 
 The solution ingests AWS CloudTrail logs from 100+ AWS accounts through the following pipeline:
 
-```
-AWS CloudTrail Org Trail -> Amazon S3 Bucket -> Amazon SQS Queue -> Amazon OpenSearch Ingestion Pipeline -> Amazon OpenSearch Service Domain
-```
+![Architecture Diagram](images/architecture.png)
 
 Key features:
+- **Centralized ingestion** from 100+ AWS accounts via organization trail
+- **Auto-scaling pipeline** from Amazon S3 through Amazon SQS to Amazon OpenSearch Ingestion
 - **500 GB/day** ingestion capacity with auto-scaling (2-10 OCUs)
 - **7-year retention** with tiered storage (hot -> warm -> cold -> delete)
 - **4 team roles** with fine-grained access control and tenant isolation
 - **Automated alerting** for AWS CloudTrail tampering events
 - **Full Terraform management** of infrastructure and application-layer config
+
+## Module Architecture
+
+The stack is decomposed into 5 reusable modules that communicate through explicit outputs:
+
+```
++-----------------------------------------------------------------------------+
+|  Root Module (main.tf)                                                      |
+|  - Composes modules, passes outputs between them, configures providers      |
++-----------------------------------------------------------------------------+
+|                                                                             |
+|  +---------------------+      +----------------------------------------+   |
+|  |  opensearch-domain   |----->|  ingestion                             |   |
+|  |  ------------------- |      |  ---------------------------------     |   |
+|  |  * Domain + cluster  |      |  * SQS queues (main + DLQ)            |   |
+|  |  * KMS encryption    |      |  * S3 event notifications             |   |
+|  |  * Security groups   |      |  * OSIS pipeline + IAM                |   |
+|  |  * CloudWatch logs   |      |  * Pipeline security group            |   |
+|  |  * Admin IAM role    |      +----------------------------------------+   |
+|  +----------+-----------+                                                   |
+|             | endpoint, admin_role_arn (configures opensearch provider)      |
+|             v                                                               |
+|  +---------------------+  +------------------+  +----------------------+   |
+|  |  index-lifecycle     |  |  access-control  |  |  alerting            |   |
+|  |  ------------------- |  |  --------------  |  |  ----------------    |   |
+|  |  * Index template    |  |  * Team roles    |  |  * SNS + KMS         |   |
+|  |  * ISM policy        |  |  * Role mappings |  |  * Tampering monitor |   |
+|  |  * Bootstrap index   |  |  * Tenants       |  |  * Notification ch.  |   |
+|  +---------------------+  +------------------+  +----------------------+   |
+|          ^                        ^                       ^                  |
+|          +------------------------+-----------------------+                  |
+|                    All use the opensearch provider                           |
++-----------------------------------------------------------------------------+
+```
+
+### Why Modules?
+
+| Benefit | Example |
+|---------|---------|
+| **Reuse across environments** | Same `opensearch-domain` module for dev, staging, production - just change variables |
+| **Compose only what you need** | Need ingestion without alerting? Skip the `alerting` module |
+| **Adapt to new use cases** | VPC Flow Logs -> reuse `ingestion` + `index-lifecycle` with different index patterns |
+| **Team autonomy** | Security team owns `alerting` module; platform team owns `opensearch-domain` |
+| **Fewer lines of code** | One module call replaces 50-100 lines of resource definitions per environment |
+
+## File Structure
+
+```
+.
+├── README.md                        # This file
+├── LICENSE
+├── CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md
+├── .gitignore
+├── main.tf                          # Root module - calls child modules
+├── variables.tf                     # Root-level inputs (3 required + overrides)
+├── outputs.tf                       # Root-level outputs (aggregated from modules)
+├── providers.tf                     # AWS + OpenSearch provider config
+├── versions.tf                      # Terraform and provider version constraints
+├── terraform.tfvars.example         # Example values
+├── images/
+│   └── architecture.png             # Solution architecture diagram
+├── modules/
+│   ├── opensearch-domain/           # Core domain + KMS + security groups + CloudWatch
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── iam.tf
+│   ├── ingestion/                   # SQS + S3 notification + OSIS pipeline + IAM
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── index-lifecycle/             # Index template + ISM policy + initial index
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── access-control/              # Roles + role mappings + tenants
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   └── alerting/                    # SNS + monitors + notification channels
+│       ├── main.tf
+│       ├── variables.tf
+│       └── outputs.tf
+```
 
 ## Quick Start
 
@@ -23,11 +110,11 @@ You only need **3 inputs** to deploy:
 
 ```hcl
 vpc_id                    = "vpc-0abc123def456789a"
-vpc_subnet_ids            = ["subnet-aaa", "subnet-bbb", "subnet-ccc"]
+vpc_subnet_ids            = ["subnet-aaaa1111bbbb2222c", "subnet-dddd3333eeee4444f", "subnet-ffff5555aaaa6666b"]
 cloudtrail_s3_bucket_name = "amzn-s3-demo-bucket-cloudtrail-logs"
 ```
 
-The module automatically creates:
+The modules automatically create:
 - AWS IAM admin role for Amazon OpenSearch Service admin user
 - Amazon SNS topic for security alerts
 - Amazon SQS queues (main + DLQ) for ingestion throttling
@@ -45,31 +132,11 @@ The module automatically creates:
 - Amazon VPC with private subnets (at least 2 for multi-AZ, 3 recommended)
 - An existing Amazon S3 bucket where AWS CloudTrail logs are delivered
 
-## File Structure
-
-```
-.
-├── README.md                    # This file
-├── main.tf                      # OpenSearch domain, KMS key, and security groups
-├── variables.tf                 # All input variables with validation
-├── outputs.tf                   # Resource identifiers and endpoints
-├── providers.tf                 # AWS and OpenSearch provider config
-├── versions.tf                  # Terraform and provider version constraints
-├── data.tf                      # Data sources and locals
-├── iam.tf                       # Primary admin IAM role
-├── index_template.tf            # AWS CloudTrail index template with mappings
-├── ism_policy.tf                # ISM lifecycle policy (tiered storage)
-├── access_control.tf            # Roles, role mappings, tenants
-├── alerting.tf                  # Amazon SNS topic, tampering detection monitor
-├── ingestion.tf                 # Amazon SQS, Amazon S3 notifications, OSIS pipeline
-└── terraform.tfvars.example     # Example variable values
-```
-
 ## Usage
 
 1. **Clone the repository:**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/aws-samples/sample-cloudtrail-opensearch-terraform.git
    cd sample-cloudtrail-opensearch-terraform
    ```
 
@@ -85,29 +152,61 @@ The module automatically creates:
    terraform init
    ```
 
-5. **Review the plan:**
+5. **Deploy Stage 1 - the OpenSearch domain** (required before the OpenSearch provider can connect):
    ```bash
-   terraform plan
+   terraform apply -target=module.opensearch_domain
    ```
 
-6. **Apply:**
+6. **Deploy Stage 2 - everything else** (ingestion, index lifecycle, access control, alerting):
    ```bash
    terraform apply
    ```
 
 7. **Verify the deployment:**
-   1. Check the Terraform outputs:
-      ```bash
-      terraform output
-      ```
-   2. Verify the Amazon OpenSearch Service domain is active:
-      ```bash
-      aws opensearch describe-domain --domain-name cloudtrail-monitoring --query 'DomainStatus.Processing'
-      ```
-   3. Access OpenSearch Dashboards (requires VPC connectivity):
-      ```bash
-      echo "Dashboards URL: https://$(terraform output -raw opensearch_dashboards_endpoint)/_dashboards"
-      ```
+   ```bash
+   terraform output
+   aws opensearch describe-domain --domain-name cloudtrail-monitoring --query 'DomainStatus.Processing'
+   echo "Dashboards URL: https://$(terraform output -raw opensearch_dashboards_endpoint)/_dashboards"
+   ```
+
+### Two-Stage Apply Pattern
+
+The OpenSearch provider requires the domain endpoint and admin IAM role to authenticate. Since these are created by the `opensearch-domain` module, Terraform cannot configure the provider until that module's resources exist. The two-stage apply solves this:
+
+| Stage | What it creates | Why separate |
+|-------|-----------------|--------------|
+| Stage 1 | OpenSearch domain, KMS, security groups, IAM admin role, CloudWatch | Provider needs the endpoint |
+| Stage 2 | Index template, ISM policy, RBAC roles, ingestion pipeline, alerting | Requires working OpenSearch provider |
+
+After the initial two-stage deploy, subsequent `terraform apply` runs work in a single pass because the domain already exists.
+
+## Using Individual Modules
+
+Each module can be sourced independently in other Terraform configurations:
+
+```hcl
+# Example: Reuse the ingestion module for VPC Flow Logs
+module "vpc_flow_ingestion" {
+  source = "git::https://github.com/aws-samples/sample-cloudtrail-opensearch-terraform.git//modules/ingestion"
+
+  domain_name                  = "vpc-flow-monitoring"
+  vpc_id                       = var.vpc_id
+  vpc_subnet_ids               = var.vpc_subnet_ids
+  cloudtrail_s3_bucket_name    = var.flow_logs_bucket_name
+  opensearch_domain_arn        = module.opensearch_domain.arn
+  opensearch_domain_endpoint   = module.opensearch_domain.endpoint
+  opensearch_security_group_id = module.opensearch_domain.security_group_id
+}
+
+# Example: Reuse index-lifecycle with different retention
+module "vpc_flow_lifecycle" {
+  source = "git::https://github.com/aws-samples/sample-cloudtrail-opensearch-terraform.git//modules/index-lifecycle"
+
+  hot_retention_days  = 30
+  warm_retention_days = 90
+  cold_retention_days = 365
+}
+```
 
 ## Required Inputs
 
@@ -152,7 +251,7 @@ The module automatically creates:
 
 ### Adding a new team role
 
-1. Add the role definition to `local.team_roles` in `data.tf`.
+1. Add the role definition to `local.team_roles` in `modules/access-control/main.tf`.
 2. Add the AWS IAM role ARN to `var.team_role_arns` in your tfvars.
 3. Run `terraform apply`.
 
@@ -180,7 +279,7 @@ alert_email_endpoint = "security-team@example.com"
 
 To destroy all resources:
 
-1. Remove lifecycle protection by commenting out the `prevent_destroy` block in `main.tf`:
+1. Remove lifecycle protection by commenting out the `prevent_destroy` block in `modules/opensearch-domain/main.tf`:
    ```hcl
    # lifecycle {
    #   prevent_destroy = true
@@ -205,13 +304,18 @@ This removes the following resources: Amazon OpenSearch Service domain (includin
 - AWS CloudTrail tampering is monitored with automated alerts
 - Audit logs are published to Amazon CloudWatch Logs with 365-day retention
 
-## Conclusion
+## Related Resources
 
-This solution provides a production-ready, fully automated approach to centralized AWS CloudTrail monitoring using Amazon OpenSearch Service and Terraform. It addresses common challenges including ingestion at scale, multi-team access control, compliance-driven retention, and automated threat detection.
-
-For further customization, refer to the [Amazon OpenSearch Service documentation](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/) and the [Terraform OpenSearch provider documentation](https://registry.terraform.io/providers/opensearch-project/opensearch/latest/docs).
+- [Amazon OpenSearch Service documentation](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/)
+- [Terraform OpenSearch provider documentation](https://registry.terraform.io/providers/opensearch-project/opensearch/latest/docs)
+- [Amazon OpenSearch Ingestion documentation](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/ingestion.html)
+- [AWS CloudTrail documentation](https://docs.aws.amazon.com/cloudtrail/latest/userguide/)
 
 ## Authors
 
-- Jane Doe, AWS Professional Services
-- John Stiles, AWS Professional Services
+- Jagdish Komakula, AWS Professional Services
+- Aditya Ambati, AWS Professional Services
+
+## License
+
+This library is licensed under the MIT-0 License. See the [LICENSE](LICENSE) file.

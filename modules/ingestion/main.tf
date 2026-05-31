@@ -1,4 +1,18 @@
 # -----------------------------------------------------------------------------
+# Data Sources
+# -----------------------------------------------------------------------------
+
+data "aws_region" "current" {}
+
+data "aws_partition" "current" {}
+
+locals {
+  region                   = data.aws_region.current.name
+  partition                = data.aws_partition.current.partition
+  cloudtrail_s3_bucket_arn = "arn:${local.partition}:s3:::${var.cloudtrail_s3_bucket_name}"
+}
+
+# -----------------------------------------------------------------------------
 # SQS Queue for CloudTrail Log Ingestion Throttling
 # -----------------------------------------------------------------------------
 
@@ -133,7 +147,7 @@ resource "aws_iam_role_policy" "osis_pipeline" {
           "es:DescribeDomain",
           "es:ESHttp*"
         ]
-        Resource = "${aws_opensearch_domain.cloudtrail.arn}/*"
+        Resource = "${var.opensearch_domain_arn}/*"
       }
     ]
   })
@@ -169,7 +183,7 @@ resource "aws_osis_pipeline" "cloudtrail" {
       sink:
         - opensearch:
             hosts:
-              - "https://${aws_opensearch_domain.cloudtrail.endpoint}"
+              - "https://${var.opensearch_domain_endpoint}"
             index: "cloudtrail"
             index_type: "custom"
             document_id_field: "eventID"
@@ -188,8 +202,7 @@ resource "aws_osis_pipeline" "cloudtrail" {
   }
 
   depends_on = [
-    aws_iam_role_policy.osis_pipeline,
-    aws_opensearch_domain.cloudtrail
+    aws_iam_role_policy.osis_pipeline
   ]
 }
 
@@ -226,6 +239,6 @@ resource "aws_security_group_rule" "opensearch_from_osis" {
   to_port                  = 443
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.osis_pipeline.id
-  security_group_id        = aws_security_group.opensearch.id
+  security_group_id        = var.opensearch_security_group_id
   description              = "Allow HTTPS from OSIS pipeline"
 }

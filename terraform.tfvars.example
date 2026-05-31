@@ -1,10 +1,10 @@
 # =============================================================================
-# Required inputs (only these 3 are needed to deploy!)
+# Required inputs (only these 3 are needed to deploy)
 # =============================================================================
 
 vpc_id                    = "vpc-0abc123def456789a"
-vpc_subnet_ids            = ["subnet-aaaa1111", "subnet-bbbb2222", "subnet-cccc3333"]
-cloudtrail_s3_bucket_name = "my-org-bucket"
+vpc_subnet_ids            = ["subnet-aaaa1111bbbb2222c", "subnet-dddd3333eeee4444f", "subnet-ffff5555aaaa6666b"]
+cloudtrail_s3_bucket_name = "amzn-s3-demo-bucket-cloudtrail-logs"
 
 # =============================================================================
 # Optional - Alerting
@@ -24,17 +24,56 @@ cloudtrail_s3_bucket_name = "my-org-bucket"
 # }
 
 # =============================================================================
-# Optional - Override defaults (uncomment to customize)
+# Optional - General settings (uncomment to customize)
 # =============================================================================
 
-# aws_region              = "us-east-1"
-# environment             = "production"
+# aws_region   = "us-east-1"
+# environment  = "production"
+# project_name = "centralized-cloudtrail-monitoring"
+
+# =============================================================================
+# Optional - OpenSearch domain configuration
+# =============================================================================
+
 # domain_name             = "cloudtrail-monitoring"
+# engine_version          = "OpenSearch_2.13"
 # instance_type           = "or1.2xlarge.search"
 # instance_count          = 3
 # ebs_volume_size         = 500
-# osis_min_units          = 2
-# osis_max_units          = 10
-# hot_retention_days      = 90
-# warm_retention_days     = 365
-# cold_retention_days     = 2555
+# ebs_volume_type         = "gp3"
+# ebs_iops                = 3000
+# ebs_throughput          = 125
+# availability_zone_count = 3
+
+# =============================================================================
+# Optional - Ingestion pipeline scaling
+# =============================================================================
+
+# osis_min_units = 2
+# osis_max_units = 10
+
+# =============================================================================
+# Optional - Index lifecycle retention (ISM policy)
+# =============================================================================
+
+# hot_retention_days  = 90     # Days before moving to warm storage
+# warm_retention_days = 365    # Days before moving to cold storage
+# cold_retention_days = 2555   # Total days before deletion (~7 years)
+# rollover_size       = "50gb" # Rollover index when it reaches this size
+# rollover_age        = "1d"   # Rollover index when it reaches this age
+
+# =============================================================================
+# Optional - Network access control
+# =============================================================================
+
+# allowed_cidr_blocks        = ["10.0.0.0/8"]
+# allowed_security_group_ids = ["sg-0abc123def456789a"]
+
+# =============================================================================
+# Optional - Additional tags applied to all resources
+# =============================================================================
+
+# additional_tags = {
+#   CostCenter = "12345"
+#   Team       = "security-engineering"
+# }

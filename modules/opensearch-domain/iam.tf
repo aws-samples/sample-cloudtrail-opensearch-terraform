@@ -13,7 +13,7 @@ resource "aws_iam_role" "opensearch_admin" {
         Action = "sts:AssumeRole"
         Effect = "Allow"
         Principal = {
-          AWS = "arn:${data.aws_partition.current.partition}:iam::${local.account_id}:root"
+          AWS = "arn:${local.partition}:iam::${local.account_id}:root"
         }
       }
     ]
@@ -40,7 +40,7 @@ resource "aws_iam_role_policy" "opensearch_admin" {
           "es:DescribeDomainConfig",
           "es:ListTags"
         ]
-        Resource = "arn:${data.aws_partition.current.partition}:es:${local.region}:${local.account_id}:domain/${var.domain_name}/*"
+        Resource = "arn:${local.partition}:es:${local.region}:${local.account_id}:domain/${var.domain_name}/*"
       }
     ]
   })
